@@ -105,9 +105,9 @@ Four weeks, one milestone each week. Each week ends with a working, tagged build
 
 ### Week 1: Store and inject (`v0.1.0`)
 
-- [ ] Repo setup: Go module, MIT license, CI for Windows and Linux
-- [ ] `internal/store`: save, read, list, delete keys in the keychain
-- [ ] `shelves.json` read and write, shelf name validation
+- [x] Repo setup: Go module, MIT license, CI for Windows and Linux
+- [x] `internal/store`: save, read, delete keys in the keychain (the keychain cannot be listed, so `list` reads `shelves.json`)
+- [x] `shelves.json` read and write, shelf name validation
 - [ ] CLI: `add`, `list`, `remove`
 - [ ] `cupboard run`: read `cupboard.toml`, start the command with env vars
 - [ ] Tests for store and inject
