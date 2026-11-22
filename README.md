@@ -130,7 +130,7 @@ Tray app, key rotation, rate limits, signed-request APIs (AWS SigV4, HMAC), macO
 
 ## Contributing
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md). To claim an issue or ask a question, join the [PulseEngine Discord](https://discord.gg/VU8RUByEeG).
 
 ## License
 
