@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,12 +13,13 @@ import (
 )
 
 // setup points the keychain and shelves.json at test-only places.
-func setup(t *testing.T) {
+func setup(t *testing.T) string {
 	t.Helper()
 	keyring.MockInit()
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	return dir
 }
 
 func shelves(t *testing.T) []store.Shelf {
@@ -167,4 +170,29 @@ func TestRemoveMissing(t *testing.T) {
 	if got := shelves(t); len(got) != 0 {
 		t.Fatalf("shelves = %v", got)
 	}
+}
+
+func TestAddShelvesWriteFails(t *testing.T) {
+	dir := setup(t)
+	block := func() {
+		// A directory where SaveShelves writes its temp file makes the write fail.
+		if err := os.MkdirAll(filepath.Join(dir, "api-cupboard", "shelves.json.tmp"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block()
+	if _, _, code := runCLI(t, "k", "add", "a", "--stdin", "--upstream", "https://x.com"); code != 1 {
+		t.Fatalf("new shelf: code %d", code)
+	}
+	if _, err := store.ReadKey("a"); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatalf("new shelf: key left in keychain: %v", err)
+	}
+
+	os.RemoveAll(filepath.Join(dir, "api-cupboard", "shelves.json.tmp"))
+	runCLI(t, "old", "add", "b", "--stdin", "--upstream", "https://x.com")
+	block()
+	if _, _, code := runCLI(t, "new", "add", "b", "--stdin", "--force", "--upstream", "https://y.com"); code != 1 {
+		t.Fatalf("replace: code %d", code)
+	}
+	wantKey(t, "b", "old")
 }
