@@ -58,6 +58,12 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail(stderr, fmt.Errorf("shelf %q already exists, use --force to replace it", name))
 	}
 
+	// Without a console (Git Bash, for example) the key would show on screen, so stop before it is typed.
+	fd, isConsole := consoleFd(stdin)
+	if !*fromStdin && !isConsole {
+		return fail(stderr, errors.New("cannot hide the key because stdin is not a console: use PowerShell or Windows Terminal, or pipe the key in with --stdin and --upstream"))
+	}
+
 	in := bufio.NewReader(stdin)
 	if *upstream == "" {
 		if *fromStdin {
@@ -73,7 +79,7 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
-	key, err := readKey(stdin, in, *fromStdin, stderr)
+	key, err := readKey(in, fd, *fromStdin, stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -103,19 +109,23 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// readKey reads the key without showing it when stdin is a terminal.
-func readKey(stdin io.Reader, in *bufio.Reader, all bool, stderr io.Writer) (string, error) {
+// readKey reads all of stdin, or prompts on the console without showing what is typed.
+func readKey(in *bufio.Reader, fd int, all bool, stderr io.Writer) (string, error) {
 	if all {
 		data, err := io.ReadAll(in)
 		return strings.TrimRight(string(data), "\r\n"), err
 	}
 	fmt.Fprint(stderr, "Key: ")
+	data, err := term.ReadPassword(fd)
+	fmt.Fprintln(stderr)
+	return string(data), err
+}
+
+func consoleFd(stdin io.Reader) (int, bool) {
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		data, err := term.ReadPassword(int(f.Fd()))
-		fmt.Fprintln(stderr)
-		return string(data), err
+		return int(f.Fd()), true
 	}
-	return readLine(in)
+	return 0, false
 }
 
 func readLine(in *bufio.Reader) (string, error) {

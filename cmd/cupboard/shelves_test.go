@@ -38,18 +38,20 @@ func wantKey(t *testing.T, shelf, want string) {
 	}
 }
 
-func TestAddPrompts(t *testing.T) {
+func TestAddNeedsConsole(t *testing.T) {
 	setup(t)
+	// Test stdin is a pipe, as in Git Bash, so add must not prompt for the key.
 	stdout, stderr, code := runCLI(t, "https://api.openai.com\nsk-secret\n", "add", "openai")
-	if code != 0 {
+	if code != 1 || !strings.Contains(stderr, "--stdin") || strings.Contains(stderr, "Key:") {
 		t.Fatalf("code %d, stderr %q", code, stderr)
 	}
 	if strings.Contains(stdout+stderr, "sk-secret") {
 		t.Fatal("output shows the key")
 	}
-	wantKey(t, "openai", "sk-secret")
-	want := []store.Shelf{{Name: "openai", Upstream: "https://api.openai.com", Inject: "bearer"}}
-	if got := shelves(t); !reflect.DeepEqual(got, want) {
+	if _, err := store.ReadKey("openai"); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatalf("key saved: %v", err)
+	}
+	if got := shelves(t); got != nil {
 		t.Fatalf("shelves = %v", got)
 	}
 }
@@ -74,10 +76,10 @@ func TestAddRefuses(t *testing.T) {
 		stdin string
 		args  []string
 	}{
-		"http upstream":     {"http://api.openai.com\nk\n", []string{"add", "openai"}},
-		"bad name":          {"https://x.com\nk\n", []string{"add", "Open/AI"}},
-		"header no name":    {"https://x.com\nk\n", []string{"add", "a", "--inject", "header"}},
-		"empty key":         {"https://x.com\n\n", []string{"add", "a"}},
+		"http upstream":     {"k", []string{"add", "openai", "--stdin", "--upstream", "http://api.openai.com"}},
+		"bad name":          {"k", []string{"add", "Open/AI", "--stdin", "--upstream", "https://x.com"}},
+		"header no name":    {"k", []string{"add", "a", "--stdin", "--upstream", "https://x.com", "--inject", "header"}},
+		"empty key":         {"\r\n", []string{"add", "a", "--stdin", "--upstream", "https://x.com"}},
 		"stdin no upstream": {"k", []string{"add", "a", "--stdin"}},
 	}
 	for name, c := range cases {
