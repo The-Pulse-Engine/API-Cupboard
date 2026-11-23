@@ -47,8 +47,8 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	commands := map[string]command{
 		"add":    cmdAdd,
-		"list":   notImplemented,
-		"remove": notImplemented,
+		"list":   cmdList,
+		"remove": cmdRemove,
 		"run":    notImplemented,
 		"serve":  notImplemented,
 	}

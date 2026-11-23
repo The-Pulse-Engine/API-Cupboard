@@ -9,8 +9,10 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/The-Pulse-Engine/API-Cupboard/internal/store"
+	"github.com/zalando/go-keyring"
 	"golang.org/x/term"
 )
 
@@ -136,4 +138,57 @@ func loadShelves() (string, []store.Shelf, error) {
 func fail(stderr io.Writer, err error) int {
 	fmt.Fprintf(stderr, "cupboard: %v\n", err)
 	return 1
+}
+
+func cmdList(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "usage: cupboard list")
+		return 2
+	}
+	_, shelves, err := loadShelves()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if len(shelves) == 0 {
+		fmt.Fprintln(stdout, "No shelves yet. Run: cupboard add <shelf>")
+		return 0
+	}
+	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tUPSTREAM\tINJECT")
+	for _, s := range shelves {
+		rule := s.Inject
+		if s.Inject == "header" {
+			rule += " " + s.Header
+		} else if s.Inject == "query" {
+			rule += " " + s.Query
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", s.Name, s.Upstream, rule)
+	}
+	w.Flush()
+	return 0
+}
+
+func cmdRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) != 1 {
+		fmt.Fprintln(stderr, "usage: cupboard remove <shelf>")
+		return 2
+	}
+	name := args[0]
+	path, shelves, err := loadShelves()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	idx := slices.IndexFunc(shelves, func(s store.Shelf) bool { return s.Name == name })
+	if idx < 0 {
+		return fail(stderr, fmt.Errorf("shelf %q does not exist, run cupboard list to see your shelves", name))
+	}
+	// A key that is already gone is fine: the shelf still goes.
+	if err := store.DeleteKey(name); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+		return fail(stderr, err)
+	}
+	if err := store.SaveShelves(path, slices.Delete(shelves, idx, idx+1)); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "removed shelf %s\n", name)
+	return 0
 }

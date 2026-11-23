@@ -114,3 +114,57 @@ func TestAddKeychainFails(t *testing.T) {
 		t.Fatalf("shelves.json changed: %v", got)
 	}
 }
+
+func TestList(t *testing.T) {
+	setup(t)
+	if stdout, _, code := runCLI(t, "", "list"); code != 0 || !strings.Contains(stdout, "cupboard add") {
+		t.Fatalf("empty: code %d, stdout %q", code, stdout)
+	}
+	runCLI(t, "sk-one", "add", "openai", "--stdin", "--upstream", "https://api.openai.com")
+	runCLI(t, "sk-two", "add", "anthropic", "--stdin", "--upstream", "https://api.anthropic.com",
+		"--inject", "header", "--header", "x-api-key")
+	stdout, _, code := runCLI(t, "", "list")
+	if code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	for _, want := range []string{"openai", "https://api.openai.com", "bearer", "anthropic", "header x-api-key"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("list misses %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "sk-") {
+		t.Errorf("list shows a key:\n%s", stdout)
+	}
+}
+
+func TestRemove(t *testing.T) {
+	setup(t)
+	runCLI(t, "k1", "add", "a", "--stdin", "--upstream", "https://x.com")
+	runCLI(t, "k2", "add", "b", "--stdin", "--upstream", "https://y.com")
+	if _, stderr, code := runCLI(t, "", "remove", "a"); code != 0 {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	if _, err := store.ReadKey("a"); !errors.Is(err, keyring.ErrNotFound) {
+		t.Fatalf("key still there: %v", err)
+	}
+	if got := shelves(t); len(got) != 1 || got[0].Name != "b" {
+		t.Fatalf("shelves = %v", got)
+	}
+	wantKey(t, "b", "k2")
+}
+
+func TestRemoveMissing(t *testing.T) {
+	setup(t)
+	if _, stderr, code := runCLI(t, "", "remove", "nope"); code != 1 || !strings.Contains(stderr, `"nope" does not exist`) {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	// The key is gone from the keychain but the shelf is still listed.
+	runCLI(t, "k", "add", "a", "--stdin", "--upstream", "https://x.com")
+	store.DeleteKey("a")
+	if _, stderr, code := runCLI(t, "", "remove", "a"); code != 0 {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	if got := shelves(t); len(got) != 0 {
+		t.Fatalf("shelves = %v", got)
+	}
+}
