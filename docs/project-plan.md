@@ -108,9 +108,9 @@ Four weeks, one milestone each week. Each week ends with a working, tagged build
 - [x] Repo setup: Go module, MIT license, CI for Windows and Linux
 - [x] `internal/store`: save, read, delete keys in the keychain (the keychain cannot be listed, so `list` reads `shelves.json`)
 - [x] `shelves.json` read and write, shelf name validation
-- [ ] CLI: `add`, `list`, `remove`
-- [ ] `cupboard run`: read `cupboard.toml`, start the command with env vars
-- [ ] Tests for store and inject
+- [x] CLI: `add`, `list`, `remove`
+- [x] `cupboard run`: read `cupboard.toml`, start the command with env vars
+- [x] Tests for store and inject
 
 ### Week 2: Proxy (`v0.2.0`)
 
