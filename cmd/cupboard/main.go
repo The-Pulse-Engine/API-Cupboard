@@ -49,7 +49,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"add":    cmdAdd,
 		"list":   cmdList,
 		"remove": cmdRemove,
-		"run":    notImplemented,
+		"run":    cmdRun,
 		"serve":  notImplemented,
 	}
 	if fs.NArg() > 0 {
