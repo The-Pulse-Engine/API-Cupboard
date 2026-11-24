@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 )
 
 var (
@@ -107,16 +108,9 @@ func SaveShelves(path string, shelves []Shelf) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	// Write, flush to disk, then rename, so a crash never leaves a half-written file.
-	tmp := path + ".tmp"
-	if err := writeSynced(tmp, data); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func writeSynced(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	// Write a temp file of our own, flush it to disk, then rename it, so a
+	// crash or a second writer never leaves a half-written shelves.json.
+	f, err := os.CreateTemp(filepath.Dir(path), "shelves-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -127,5 +121,33 @@ func writeSynced(path string, data []byte) error {
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
+	if err == nil {
+		err = os.Rename(f.Name(), path)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
 	return err
+}
+
+// LockShelves stops two cupboard commands from changing shelves.json at the
+// same time. Take it before LoadShelves and hold it until SaveShelves returns.
+func LockShelves(path string) (unlock func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	lock := path + ".lock"
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			f.Close()
+			return func() { os.Remove(lock) }, nil
+		}
+		// Windows reports a lock file that is being deleted as a permission error.
+		if !errors.Is(err, fs.ErrExist) && !errors.Is(err, fs.ErrPermission) || time.Now().After(deadline) {
+			return nil, fmt.Errorf("cannot lock shelves.json: %w (if no other cupboard command is running, delete %s)", err, lock)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

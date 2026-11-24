@@ -3,10 +3,13 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zalando/go-keyring"
@@ -108,7 +111,7 @@ func TestLoadBadJSON(t *testing.T) {
 
 func TestBadNames(t *testing.T) {
 	keyring.MockInit()
-	for _, name := range []string{"", "A", "../x", "a b", "a/b"} {
+	for _, name := range []string{"", "A", "../x", "a b", "a/b", "-dev", "-"} {
 		if err := SaveKey(name, "k"); err != ErrBadName {
 			t.Errorf("SaveKey(%q) = %v", name, err)
 		}
@@ -127,5 +130,70 @@ func writeJSON(t *testing.T, path string, v any) {
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func shelvesNamed(prefix string, n int) []Shelf {
+	var s []Shelf
+	for i := 0; i < n; i++ {
+		s = append(s, Shelf{Name: fmt.Sprintf("%s-%d", prefix, i), Upstream: "https://example.com/" + strings.Repeat("a", 50), Inject: "bearer"})
+	}
+	return s
+}
+
+// Two saves at once used to share one temp file and corrupt shelves.json.
+func TestConcurrentSavesNeverCorrupt(t *testing.T) {
+	for round := 0; round < 50; round++ {
+		path := filepath.Join(t.TempDir(), "shelves.json")
+		var wg sync.WaitGroup
+		for _, n := range []int{1, 6} {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				SaveShelves(path, shelvesNamed("s", n)) // a rename can lose the race on Windows; that is fine
+			}()
+		}
+		wg.Wait()
+		got, err := LoadShelves(path)
+		if err != nil || (len(got) != 1 && len(got) != 6) {
+			t.Fatalf("round %d: %d shelves, %v", round, len(got), err)
+		}
+	}
+}
+
+// With the lock, concurrent read-change-write cycles keep every shelf.
+func TestLockKeepsEveryShelf(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "new-dir", "shelves.json")
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			unlock, err := LockShelves(path)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer unlock()
+			shelves, err := LoadShelves(path)
+			if err == nil {
+				err = SaveShelves(path, append(shelves, shelvesNamed(fmt.Sprint("w", i), 1)...))
+			}
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	if got, err := LoadShelves(path); err != nil || len(got) != 20 {
+		t.Fatalf("%d shelves, %v", len(got), err)
+	}
+	if _, err := os.Stat(path + ".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("lock file left behind: %v", err)
 	}
 }
