@@ -53,6 +53,9 @@ func Load(path string) (map[string]string, error) {
 	if extra := md.Undecoded(); len(extra) > 0 {
 		return nil, fmt.Errorf("%s: unknown key %q, only [env] is allowed", path, extra[0].String())
 	}
+	if len(cfg.Env) == 0 {
+		return nil, fmt.Errorf("%s: [env] has no entries, so no keys would be passed", path)
+	}
 	for name, shelf := range cfg.Env {
 		if !validEnv.MatchString(name) {
 			return nil, fmt.Errorf("%s: %q is not a valid env var name", path, name)

@@ -2,8 +2,6 @@ package main
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,13 +11,12 @@ import (
 )
 
 // setup points the keychain and shelves.json at test-only places.
-func setup(t *testing.T) string {
+func setup(t *testing.T) {
 	t.Helper()
 	keyring.MockInit()
 	dir := t.TempDir()
 	t.Setenv("APPDATA", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	return dir
 }
 
 func shelves(t *testing.T) []store.Shelf {
@@ -176,27 +173,62 @@ func TestRemoveMissing(t *testing.T) {
 	}
 }
 
+// failWith makes the named hook fail for one test.
+func failWith[T any](t *testing.T, hook *T, fake T) {
+	old := *hook
+	*hook = fake
+	t.Cleanup(func() { *hook = old })
+}
+
 func TestAddShelvesWriteFails(t *testing.T) {
-	dir := setup(t)
-	block := func() {
-		// A directory where SaveShelves writes its temp file makes the write fail.
-		if err := os.MkdirAll(filepath.Join(dir, "api-cupboard", "shelves.json.tmp"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	block()
+	setup(t)
+	runCLI(t, "old", "add", "b", "--stdin", "--upstream", "https://x.com")
+	failWith(t, &saveShelves, func(string, []store.Shelf) error { return errors.New("disk full") })
+
 	if _, _, code := runCLI(t, "k", "add", "a", "--stdin", "--upstream", "https://x.com"); code != 1 {
 		t.Fatalf("new shelf: code %d", code)
 	}
 	if _, err := store.ReadKey("a"); !errors.Is(err, keyring.ErrNotFound) {
 		t.Fatalf("new shelf: key left in keychain: %v", err)
 	}
-
-	os.RemoveAll(filepath.Join(dir, "api-cupboard", "shelves.json.tmp"))
-	runCLI(t, "old", "add", "b", "--stdin", "--upstream", "https://x.com")
-	block()
 	if _, _, code := runCLI(t, "new", "add", "b", "--stdin", "--force", "--upstream", "https://y.com"); code != 1 {
 		t.Fatalf("replace: code %d", code)
 	}
 	wantKey(t, "b", "old")
+}
+
+func TestAddForceStopsWhenOldKeyUnreadable(t *testing.T) {
+	setup(t)
+	runCLI(t, "old", "add", "b", "--stdin", "--upstream", "https://x.com")
+	failWith(t, &readOldKey, func(string) (string, error) { return "", errors.New("keychain locked") })
+	if _, stderr, code := runCLI(t, "new", "add", "b", "--stdin", "--force", "--upstream", "https://y.com"); code != 1 || !strings.Contains(stderr, "keychain locked") {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	wantKey(t, "b", "old")
+	if got := shelves(t); got[0].Upstream != "https://x.com" {
+		t.Fatalf("shelves = %v", got)
+	}
+}
+
+func TestAddKeyInUpstream(t *testing.T) {
+	setup(t)
+	_, stderr, code := runCLI(t, "AIzaSecret123", "add", "gemini", "--stdin", "--upstream", "https://example.com/v1?key=AIzaSecret123")
+	if code != 1 || !strings.Contains(stderr, "contains the key") || strings.Contains(stderr, "AIzaSecret123") {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	if got := shelves(t); got != nil {
+		t.Fatalf("shelves = %v", got)
+	}
+}
+
+func TestRemoveKeepsShelfWhenKeychainFails(t *testing.T) {
+	setup(t)
+	runCLI(t, "k", "add", "a", "--stdin", "--upstream", "https://x.com")
+	keyring.MockInitWithError(errors.New("keychain locked"))
+	if _, stderr, code := runCLI(t, "", "remove", "a"); code != 1 || !strings.Contains(stderr, "keychain locked") {
+		t.Fatalf("code %d, stderr %q", code, stderr)
+	}
+	if got := shelves(t); len(got) != 1 {
+		t.Fatalf("shelf removed although its key was not: %v", got)
+	}
 }

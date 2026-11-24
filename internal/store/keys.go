@@ -10,8 +10,9 @@ import (
 const service = "api-cupboard"
 
 var (
-	ErrBadName = errors.New("shelf name must use only a-z, 0-9 and -")
-	validName  = regexp.MustCompile(`^[a-z0-9-]+$`)
+	ErrBadName = errors.New("shelf name must use only a-z, 0-9 and -, and must not start with -")
+	// A leading - would make the name look like a flag on the command line.
+	validName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
 func ValidName(name string) bool { return validName.MatchString(name) }
