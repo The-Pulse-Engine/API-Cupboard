@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"time"
 )
 
@@ -130,6 +131,10 @@ func SaveShelves(path string, shelves []Shelf) error {
 	return err
 }
 
+// A lock older than this belongs to a command that died. Real holders keep it for milliseconds,
+// or for as long as a keychain password dialog stays open.
+const staleLock = time.Minute
+
 // LockShelves stops two cupboard commands from changing shelves.json at the
 // same time. Take it before LoadShelves and hold it until SaveShelves returns.
 func LockShelves(path string) (unlock func(), err error) {
@@ -145,8 +150,19 @@ func LockShelves(path string) (unlock func(), err error) {
 			return func() { os.Remove(lock) }, nil
 		}
 		// Windows reports a lock file that is being deleted as a permission error.
-		if !errors.Is(err, fs.ErrExist) && !errors.Is(err, fs.ErrPermission) || time.Now().After(deadline) {
-			return nil, fmt.Errorf("cannot lock shelves.json: %w (if no other cupboard command is running, delete %s)", err, lock)
+		// Elsewhere, permission denied means the folder is read-only, and waiting will not help.
+		busy := errors.Is(err, fs.ErrExist) || runtime.GOOS == "windows" && errors.Is(err, fs.ErrPermission)
+		if !busy {
+			return nil, fmt.Errorf("cannot lock shelves.json: %w", err)
+		}
+		// A command stopped while it held the lock (Ctrl+C, a crash) leaves it behind.
+		// shortcut: two commands that find the same stale lock at once can both take it; fine for one person at a keyboard.
+		if info, serr := os.Stat(lock); serr == nil && time.Since(info.ModTime()) > staleLock {
+			os.Remove(lock)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("another cupboard command holds %s; if none is running, wait a minute and try again", lock)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

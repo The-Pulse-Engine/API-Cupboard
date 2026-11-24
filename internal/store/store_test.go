@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/zalando/go-keyring"
 )
@@ -194,6 +195,31 @@ func TestLockKeepsEveryShelf(t *testing.T) {
 		t.Fatalf("%d shelves, %v", len(got), err)
 	}
 	if _, err := os.Stat(path + ".lock"); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("lock file left behind: %v", err)
+	}
+}
+
+// A lock left by a command that died must not block later commands.
+func TestLockTakesOverStaleLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shelves.json")
+	lock := path + ".lock"
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * staleLock)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	unlock, err := LockShelves(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("took %v to take a stale lock", time.Since(start))
+	}
+	unlock()
+	if _, err := os.Stat(lock); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("lock file left behind: %v", err)
 	}
 }
