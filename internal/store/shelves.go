@@ -8,12 +8,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 var (
-	ErrBadUpstream = errors.New("upstream must be an https:// URL with a host")
-	ErrBadInject   = errors.New("inject must be bearer, basic, header (with a header name) or query (with a query name)")
+	ErrBadUpstream = errors.New("upstream must be an https:// URL with a host and no user name or password")
+	ErrBadInject   = errors.New("inject must be bearer, basic, header (with a valid header name) or query (with a query name)")
 	ErrDuplicate   = errors.New("shelf name is used twice")
+
+	// An HTTP header name is a token (RFC 9110, section 5.6.2).
+	validHeader = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 )
 
 type Shelf struct {
@@ -31,12 +35,13 @@ func (s Shelf) Validate() error {
 		return fmt.Errorf("shelf %q: %w", s.Name, ErrBadName)
 	}
 	u, err := url.Parse(s.Upstream)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	// A user name or password in the URL would be a secret in a plaintext file.
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
 		return fmt.Errorf("shelf %q: %w", s.Name, ErrBadUpstream)
 	}
 	switch {
 	case s.Inject == "bearer", s.Inject == "basic",
-		s.Inject == "header" && s.Header != "",
+		s.Inject == "header" && validHeader.MatchString(s.Header),
 		s.Inject == "query" && s.Query != "":
 		return nil
 	}
@@ -76,7 +81,7 @@ func LoadShelves(path string) ([]Shelf, error) {
 	}
 	var shelves []Shelf
 	if err := json.Unmarshal(data, &shelves); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	// Files from v0 have no inject field.
 	for i := range shelves {
@@ -102,10 +107,25 @@ func SaveShelves(path string, shelves []Shelf) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	// Write then rename, so a crash never leaves a half-written file.
+	// Write, flush to disk, then rename, so a crash never leaves a half-written file.
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := writeSynced(tmp, data); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+func writeSynced(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }

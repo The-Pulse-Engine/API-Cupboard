@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"syscall"
 
 	"github.com/The-Pulse-Engine/API-Cupboard/internal/inject"
 )
@@ -37,19 +38,37 @@ func cmdRun(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 
-	// The console sends Ctrl+C to the child as well. Ignore it here and
-	// wait, so the child can shut down and we return its exit code.
+	// The console sends Ctrl+C to the child as well, so ignore it here and
+	// wait for the child. SIGTERM (kill, an IDE stop button) reaches only
+	// us, so pass it on, or the child keeps running with the keys.
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
 
-	err = cmd.Run()
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		return fail(stderr, err)
 	}
-	return 0
+	go func() {
+		for s := range sig {
+			if s != os.Interrupt {
+				cmd.Process.Signal(s) // Windows cannot send SIGTERM; the console closes the child there.
+			}
+		}
+	}()
+	return exitCode(cmd.Wait(), stderr)
+}
+
+// exitCode follows the shell rule: 128 + the signal number when the child was killed by a signal.
+func exitCode(err error, stderr io.Writer) int {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		if err != nil {
+			return fail(stderr, err)
+		}
+		return 0
+	}
+	if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return exitErr.ExitCode()
 }

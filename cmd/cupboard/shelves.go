@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/The-Pulse-Engine/API-Cupboard/internal/store"
 	"github.com/zalando/go-keyring"
@@ -86,8 +87,17 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if key == "" {
 		return fail(stderr, errors.New("the key is empty"))
 	}
+	// A line break would break header injection, and a NUL breaks env vars on Windows.
+	if strings.ContainsFunc(key, unicode.IsControl) {
+		return fail(stderr, errors.New("the key has a line break or another control character, check what you pasted or piped in"))
+	}
 
 	oldKey, oldErr := store.ReadKey(name)
+	hadKey := oldErr == nil
+	if !hadKey && !errors.Is(oldErr, keyring.ErrNotFound) {
+		// Without the old key, a failed write below could not be undone.
+		return fail(stderr, oldErr)
+	}
 	if err := store.SaveKey(name, key); err != nil {
 		return fail(stderr, err)
 	}
@@ -98,10 +108,14 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	if err := store.SaveShelves(path, shelves); err != nil {
 		// Put the keychain back as it was, so it matches shelves.json.
-		if oldErr == nil {
-			store.SaveKey(name, oldKey)
+		var undo error
+		if hadKey {
+			undo = store.SaveKey(name, oldKey)
 		} else {
-			store.DeleteKey(name)
+			undo = store.DeleteKey(name)
+		}
+		if undo != nil {
+			fmt.Fprintf(stderr, "cupboard: could not undo the keychain change for shelf %q, so the keychain and shelves.json no longer match: %v\n", name, undo)
 		}
 		return fail(stderr, err)
 	}
