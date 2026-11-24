@@ -81,6 +81,8 @@ func TestAddRefuses(t *testing.T) {
 		"header no name":    {"k", []string{"add", "a", "--stdin", "--upstream", "https://x.com", "--inject", "header"}},
 		"empty key":         {"\r\n", []string{"add", "a", "--stdin", "--upstream", "https://x.com"}},
 		"stdin no upstream": {"k", []string{"add", "a", "--stdin"}},
+		"two-line key":      {"line1\nline2\n", []string{"add", "a", "--stdin", "--upstream", "https://x.com"}},
+		"key with NUL":      {"sk\x00x", []string{"add", "a", "--stdin", "--upstream", "https://x.com"}},
 	}
 	for name, c := range cases {
 		setup(t)
