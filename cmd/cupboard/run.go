@@ -36,8 +36,11 @@ func cmdRun(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	// Any cupboard.toml can ask for any shelf, for example in a cloned repo, so say what goes out.
-	for _, name := range slices.Sorted(maps.Keys(vars)) {
-		fmt.Fprintf(stderr, "cupboard: %s from shelf %q\n", name, vars[name])
+	// Only on a console: in a pipe such as 2>&1 | jq, the extra lines would break the output.
+	if _, ok := consoleFd(stderr); ok {
+		for _, name := range slices.Sorted(maps.Keys(vars)) {
+			fmt.Fprintf(stderr, "cupboard: %s from shelf %q\n", name, vars[name])
+		}
 	}
 
 	cmd := exec.Command(args[1], args[2:]...)

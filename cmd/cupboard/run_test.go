@@ -103,8 +103,9 @@ func TestRun(t *testing.T) {
 	if strings.Contains(stderr, "sk-run") {
 		t.Fatalf("stderr shows the key: %q", stderr)
 	}
-	if !strings.Contains(stderr, `cupboard: CUPBOARD_TEST_KEY from shelf "test"`) {
-		t.Fatalf("stderr does not say which key went out: %q", stderr)
+	// Test stderr is a buffer, not a console, so the "from shelf" note must stay out of piped output.
+	if stderr != "" {
+		t.Fatalf("stderr is not empty when it is not a console: %q", stderr)
 	}
 }
 
