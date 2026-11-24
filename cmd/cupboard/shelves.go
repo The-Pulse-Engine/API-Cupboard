@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -101,8 +102,8 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if strings.ContainsFunc(key, unicode.IsControl) {
 		return fail(stderr, errors.New("the key has a line break or another control character, check what you pasted or piped in"))
 	}
-	// shelves.json is a plaintext file that cupboard list prints.
-	if strings.Contains(shelf.Upstream, key) {
+	// shelves.json is a plaintext file that cupboard list prints. A key with + / = is often %-encoded in URLs.
+	if strings.Contains(shelf.Upstream, key) || strings.Contains(shelf.Upstream, url.QueryEscape(key)) {
 		return fail(stderr, errors.New("the upstream URL contains the key: remove the key from the URL, and use --inject query --query <name> if the API wants it in the URL"))
 	}
 
@@ -163,8 +164,9 @@ func readKey(in *bufio.Reader, fd int, all bool, stderr io.Writer) (string, erro
 	return string(data), err
 }
 
-func consoleFd(stdin io.Reader) (int, bool) {
-	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+// consoleFd reports whether stdin or stderr is a console, and its file descriptor.
+func consoleFd(stream any) (int, bool) {
+	if f, ok := stream.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
 		return int(f.Fd()), true
 	}
 	return 0, false

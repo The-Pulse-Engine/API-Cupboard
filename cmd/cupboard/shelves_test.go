@@ -211,13 +211,18 @@ func TestAddForceStopsWhenOldKeyUnreadable(t *testing.T) {
 }
 
 func TestAddKeyInUpstream(t *testing.T) {
-	setup(t)
-	_, stderr, code := runCLI(t, "AIzaSecret123", "add", "gemini", "--stdin", "--upstream", "https://example.com/v1?key=AIzaSecret123")
-	if code != 1 || !strings.Contains(stderr, "contains the key") || strings.Contains(stderr, "AIzaSecret123") {
-		t.Fatalf("code %d, stderr %q", code, stderr)
-	}
-	if got := shelves(t); got != nil {
-		t.Fatalf("shelves = %v", got)
+	for key, upstream := range map[string]string{
+		"AIzaSecret123": "https://example.com/v1?key=AIzaSecret123",
+		"abc+def/ghi=":  "https://example.com/v1?key=abc%2Bdef%2Fghi%3D", // %-encoded in the URL
+	} {
+		setup(t)
+		_, stderr, code := runCLI(t, key, "add", "gemini", "--stdin", "--upstream", upstream)
+		if code != 1 || !strings.Contains(stderr, "contains the key") || strings.Contains(stderr, key) {
+			t.Fatalf("%s: code %d, stderr %q", key, code, stderr)
+		}
+		if got := shelves(t); got != nil {
+			t.Fatalf("%s: shelves = %v", key, got)
+		}
 	}
 }
 
