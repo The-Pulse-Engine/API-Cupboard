@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/zalando/go-keyring"
@@ -73,8 +74,12 @@ func TestRejectedShelves(t *testing.T) {
 		{"http upstream", with(func(s *Shelf) { s.Upstream = "http://example.com" }), ErrBadUpstream},
 		{"no host", with(func(s *Shelf) { s.Upstream = "https://" }), ErrBadUpstream},
 		{"empty upstream", with(func(s *Shelf) { s.Upstream = "" }), ErrBadUpstream},
+		{"port only", with(func(s *Shelf) { s.Upstream = "https://:443" }), ErrBadUpstream},
+		{"user in upstream", with(func(s *Shelf) { s.Upstream = "https://user:pass@example.com" }), ErrBadUpstream},
 		{"unknown inject", with(func(s *Shelf) { s.Inject = "cookie" }), ErrBadInject},
 		{"header without name", with(func(s *Shelf) { s.Inject = "header" }), ErrBadInject},
+		{"header with line break", with(func(s *Shelf) { s.Inject, s.Header = "header", "x-key\r\nX-Evil: 1" }), ErrBadInject},
+		{"header with space", with(func(s *Shelf) { s.Inject, s.Header = "header", "x key" }), ErrBadInject},
 		{"query without name", with(func(s *Shelf) { s.Inject = "query" }), ErrBadInject},
 	}
 	for _, c := range cases {
@@ -88,6 +93,16 @@ func TestRejectedShelves(t *testing.T) {
 		if _, err := LoadShelves(path); !errors.Is(err, c.want) {
 			t.Errorf("%s: LoadShelves = %v", c.name, err)
 		}
+	}
+}
+
+func TestLoadBadJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shelves.json")
+	if err := os.WriteFile(path, []byte("[{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadShelves(path); err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("err = %v, want the file path in it", err)
 	}
 }
 
