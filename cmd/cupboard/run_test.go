@@ -17,11 +17,22 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Prints the env var named by the first argument and exits with the second.
+// "kill" kills itself, and "wait" prints a line and sleeps.
 func main() {
 	fmt.Print(os.Getenv(os.Args[1]))
+	switch os.Args[2] {
+	case "kill":
+		p, _ := os.FindProcess(os.Getpid())
+		p.Kill()
+		time.Sleep(10 * time.Second)
+	case "wait":
+		fmt.Println(" ready")
+		time.Sleep(10 * time.Second)
+	}
 	code, _ := strconv.Atoi(os.Args[2])
 	os.Exit(code)
 }
