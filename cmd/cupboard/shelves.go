@@ -17,6 +17,12 @@ import (
 	"golang.org/x/term"
 )
 
+// Tests replace these to reach the failure branches that the keychain mock cannot.
+var (
+	readOldKey  = store.ReadKey
+	saveShelves = store.SaveShelves
+)
+
 const addUsage = "usage: cupboard add <shelf> [--upstream URL] [--inject bearer|basic|header|query] [--header NAME] [--query NAME] [--stdin] [--force]"
 
 func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -54,15 +60,19 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	idx := slices.IndexFunc(shelves, func(s store.Shelf) bool { return s.Name == name })
-	if idx >= 0 && !*force {
-		return fail(stderr, fmt.Errorf("shelf %q already exists, use --force to replace it", name))
+	// Check early so the user does not type a key for nothing. The check runs again under the lock.
+	if findShelf(shelves, name) >= 0 && !*force {
+		return fail(stderr, errExists(name))
 	}
 
 	// Without a console (Git Bash, for example) the key would show on screen, so stop before it is typed.
+	// With --stdin on a console, the typed key would show too.
 	fd, isConsole := consoleFd(stdin)
 	if !*fromStdin && !isConsole {
 		return fail(stderr, errors.New("cannot hide the key because stdin is not a console: use PowerShell or Windows Terminal, or pipe the key in with --stdin and --upstream"))
+	}
+	if *fromStdin && isConsole {
+		return fail(stderr, errors.New("--stdin reads piped input: pipe the key in, or leave out --stdin to type it at a hidden prompt"))
 	}
 
 	in := bufio.NewReader(stdin)
@@ -91,8 +101,26 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if strings.ContainsFunc(key, unicode.IsControl) {
 		return fail(stderr, errors.New("the key has a line break or another control character, check what you pasted or piped in"))
 	}
+	// shelves.json is a plaintext file that cupboard list prints.
+	if strings.Contains(shelf.Upstream, key) {
+		return fail(stderr, errors.New("the upstream URL contains the key: remove the key from the URL, and use --inject query --query <name> if the API wants it in the URL"))
+	}
 
-	oldKey, oldErr := store.ReadKey(name)
+	unlock, err := store.LockShelves(path)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer unlock()
+	// Read again: another command may have changed the file while the user typed.
+	if shelves, err = store.LoadShelves(path); err != nil {
+		return fail(stderr, err)
+	}
+	idx := findShelf(shelves, name)
+	if idx >= 0 && !*force {
+		return fail(stderr, errExists(name))
+	}
+
+	oldKey, oldErr := readOldKey(name)
 	hadKey := oldErr == nil
 	if !hadKey && !errors.Is(oldErr, keyring.ErrNotFound) {
 		// Without the old key, a failed write below could not be undone.
@@ -106,7 +134,7 @@ func cmdAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	} else {
 		shelves = append(shelves, shelf)
 	}
-	if err := store.SaveShelves(path, shelves); err != nil {
+	if err := saveShelves(path, shelves); err != nil {
 		// Put the keychain back as it was, so it matches shelves.json.
 		var undo error
 		if hadKey {
@@ -159,6 +187,14 @@ func loadShelves() (string, []store.Shelf, error) {
 	return path, shelves, err
 }
 
+func findShelf(shelves []store.Shelf, name string) int {
+	return slices.IndexFunc(shelves, func(s store.Shelf) bool { return s.Name == name })
+}
+
+func errExists(name string) error {
+	return fmt.Errorf("shelf %q already exists, use --force to replace it", name)
+}
+
 func fail(stderr io.Writer, err error) int {
 	fmt.Fprintf(stderr, "cupboard: %v\n", err)
 	return 1
@@ -198,11 +234,20 @@ func cmdRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 	name := args[0]
-	path, shelves, err := loadShelves()
+	path, err := store.ShelvesPath()
 	if err != nil {
 		return fail(stderr, err)
 	}
-	idx := slices.IndexFunc(shelves, func(s store.Shelf) bool { return s.Name == name })
+	unlock, err := store.LockShelves(path)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer unlock()
+	shelves, err := store.LoadShelves(path)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	idx := findShelf(shelves, name)
 	if idx < 0 {
 		return fail(stderr, fmt.Errorf("shelf %q does not exist, run cupboard list to see your shelves", name))
 	}
@@ -210,7 +255,7 @@ func cmdRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if err := store.DeleteKey(name); err != nil && !errors.Is(err, keyring.ErrNotFound) {
 		return fail(stderr, err)
 	}
-	if err := store.SaveShelves(path, slices.Delete(shelves, idx, idx+1)); err != nil {
+	if err := saveShelves(path, slices.Delete(shelves, idx, idx+1)); err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "removed shelf %s\n", name)
