@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/The-Pulse-Engine/API-Cupboard/internal/store"
@@ -38,22 +40,43 @@ func main() {
 }
 `
 
-// buildHelper compiles helperSrc and returns the path of the program.
+var helper struct {
+	once     sync.Once
+	dir, bin string
+	err      error
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if helper.dir != "" {
+		os.RemoveAll(helper.dir)
+	}
+	os.Exit(code)
+}
+
+// buildHelper compiles helperSrc once per test run and returns the path of the program.
 func buildHelper(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	src := filepath.Join(dir, "helper.go")
-	if err := os.WriteFile(src, []byte(helperSrc), 0o600); err != nil {
-		t.Fatal(err)
+	helper.once.Do(func() {
+		if helper.dir, helper.err = os.MkdirTemp("", "cupboard-helper-"); helper.err != nil {
+			return
+		}
+		src := filepath.Join(helper.dir, "helper.go")
+		if helper.err = os.WriteFile(src, []byte(helperSrc), 0o600); helper.err != nil {
+			return
+		}
+		helper.bin = filepath.Join(helper.dir, "helper")
+		if runtime.GOOS == "windows" {
+			helper.bin += ".exe"
+		}
+		if out, err := exec.Command("go", "build", "-o", helper.bin, src).CombinedOutput(); err != nil {
+			helper.err = fmt.Errorf("build helper: %v\n%s", err, out)
+		}
+	})
+	if helper.err != nil {
+		t.Fatal(helper.err)
 	}
-	bin := filepath.Join(dir, "helper")
-	if runtime.GOOS == "windows" {
-		bin += ".exe"
-	}
-	if out, err := exec.Command("go", "build", "-o", bin, src).CombinedOutput(); err != nil {
-		t.Fatalf("build helper: %v\n%s", err, out)
-	}
-	return bin
+	return helper.bin
 }
 
 // setupProject writes a cupboard.toml, moves into it and stores the key.
@@ -79,6 +102,9 @@ func TestRun(t *testing.T) {
 	}
 	if strings.Contains(stderr, "sk-run") {
 		t.Fatalf("stderr shows the key: %q", stderr)
+	}
+	if !strings.Contains(stderr, `cupboard: CUPBOARD_TEST_KEY from shelf "test"`) {
+		t.Fatalf("stderr does not say which key went out: %q", stderr)
 	}
 }
 

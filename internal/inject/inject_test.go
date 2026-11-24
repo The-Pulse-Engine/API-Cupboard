@@ -60,6 +60,8 @@ func TestLoadRejects(t *testing.T) {
 		"bad shelf name": "[env]\nKEY = \"../openai\"\n",
 		"unknown table":  "[evn]\nKEY = \"openai\"\n",
 		"not toml":       "[env\n",
+		"empty env":      "[env]\n",
+		"empty file":     "",
 	} {
 		path := filepath.Join(t.TempDir(), FileName)
 		writeFile(t, path, body)
