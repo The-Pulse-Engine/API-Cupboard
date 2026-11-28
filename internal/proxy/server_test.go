@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -77,6 +78,26 @@ func TestHostCheck(t *testing.T) {
 	} {
 		if code, _ := get(t, port, host, "/anything"); code != want {
 			t.Errorf("Host %q: status %d, want %d", host, code, want)
+		}
+	}
+}
+
+// On port 80, clients send Host without the port.
+func TestHostCheckPort80(t *testing.T) {
+	h := checkHost(80, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	for host, want := range map[string]int{
+		"localhost":       200,
+		"127.0.0.1":       200,
+		"localhost:80":    200,
+		"evil.example":    421,
+		"evil.example:80": 421,
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/x", nil)
+		req.Host = host
+		h.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("Host %q: status %d, want %d", host, rec.Code, want)
 		}
 	}
 }

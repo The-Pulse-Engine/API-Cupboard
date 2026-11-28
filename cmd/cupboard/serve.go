@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -49,12 +50,20 @@ func cmdServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	case <-ctx.Done():
 	}
-	// Give open requests a few seconds to finish.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	stop() // from here, a second Ctrl+C ends the process at once
+
+	// Give open requests a few seconds to finish, then close the rest (an open stream, for example).
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownWait)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); errors.Is(err, context.DeadlineExceeded) {
+		srv.Close()
+		fmt.Fprintln(stdout, "cupboard: closed requests that were still open")
+	} else if err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintln(stdout, "cupboard: proxy stopped")
 	return 0
 }
+
+// shutdownWait is how long open requests get to finish. Tests make it short.
+var shutdownWait = 5 * time.Second
