@@ -5,13 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/The-Pulse-Engine/API-Cupboard/internal/proxy"
+	"github.com/The-Pulse-Engine/API-Cupboard/internal/store"
 )
 
 func cmdServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -27,13 +27,19 @@ func cmdServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 
 	// Register before the port opens, so a stop signal that comes right after cannot kill us mid-start.
+	path, err := store.ShelvesPath()
+	if err != nil {
+		return fail(stderr, err)
+	}
+	load := func() ([]store.Shelf, error) { return store.LoadShelves(path) }
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	l, err := proxy.Listen(*port)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	srv := proxy.NewServer(l, http.NotFoundHandler())
+	srv := proxy.NewServer(l, proxy.Handler(load, nil))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(l) }()
 	fmt.Fprintf(stdout, "cupboard: proxy on http://127.0.0.1:%d, press Ctrl+C to stop\n", *port)
