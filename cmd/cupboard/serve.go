@@ -27,13 +27,13 @@ func cmdServe(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// Register before the port opens, so a stop signal that comes right after cannot kill us mid-start.
 	path, err := store.ShelvesPath()
 	if err != nil {
 		return fail(stderr, err)
 	}
 	load := func() ([]store.Shelf, error) { return store.LoadShelves(path) }
 
+	// Register before the port opens, so a stop signal that comes right after cannot kill us mid-start.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	l, err := proxy.Listen(*port)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"syscall"
@@ -85,6 +86,25 @@ func TestServeClosesOpenRequestsOnStop(t *testing.T) {
 	stopServe(t, done)
 	if !strings.Contains(out.String(), "closed requests that were still open") {
 		t.Fatalf("stdout %q", out.String())
+	}
+}
+
+// serve must route to the shelves in the real shelves.json, not only start and stop.
+func TestServeUsesShelvesJSON(t *testing.T) {
+	port, done, _ := startServe(t)
+	defer stopServe(t, done)
+	// A closed port: a 502 from the upstream request proves that serve found the shelf.
+	if _, stderr, code := runCLI(t, "k", "add", "closed", "--stdin", "--upstream", "https://127.0.0.1:1"); code != 0 {
+		t.Fatalf("add: code %d, stderr %q", code, stderr)
+	}
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/closed/x", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 502 || !strings.Contains(string(body), "the upstream request failed") {
+		t.Fatalf("status %d, body %q", resp.StatusCode, body)
 	}
 }
 

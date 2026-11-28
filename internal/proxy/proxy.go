@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -61,12 +60,9 @@ func Handler(load func() ([]store.Shelf, error), transport http.RoundTripper) ht
 			},
 			Transport: transport,
 			// The default handler logs the full upstream URL, which can hold a key once
-			// query injection lands (security requirement 8). Keep the cause, drop the URL.
+			// query injection lands (security requirement 8). Transport errors name the
+			// cause but never the URL; TestUpstreamDownHidesTheURL guards that.
 			ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-				var ue *url.Error
-				if errors.As(err, &ue) {
-					err = ue.Err
-				}
 				http.Error(w, fmt.Sprintf("cupboard: shelf %q: the upstream request failed: %v", name, err), http.StatusBadGateway)
 			},
 		}
