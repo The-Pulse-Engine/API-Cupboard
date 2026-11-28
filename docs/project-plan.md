@@ -114,8 +114,8 @@ Four weeks, one milestone each week. Each week ends with a working, tagged build
 
 ### Week 2: Proxy (`v0.2.0`)
 
-- [ ] `cupboard serve` on `127.0.0.1:9090`
-- [ ] Route `/<shelf>/...` to the upstream URL
+- [x] `cupboard serve` on `127.0.0.1:9090`
+- [x] Route `/<shelf>/...` to the upstream URL
 - [ ] Header injection (`Bearer`, `Basic`, custom) and query injection
 - [ ] SSE streaming with `FlushInterval: -1`; test with the OpenAI SDK
 - [ ] Security checks 2, 3, 4, 7, 9, 10 with tests

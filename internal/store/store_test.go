@@ -223,3 +223,34 @@ func TestLockTakesOverStaleLock(t *testing.T) {
 		t.Fatalf("lock file left behind: %v", err)
 	}
 }
+
+// On Windows, a reader holding shelves.json open made a save fail with "Access is denied".
+func TestSaveWhileAnotherProcessReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shelves.json")
+	s := shelvesNamed("s", 1)
+	if err := SaveShelves(path, s); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				LoadShelves(path)
+			}
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		if err := SaveShelves(path, s); err != nil {
+			close(stop)
+			<-done
+			t.Fatalf("save %d: %v", i, err)
+		}
+	}
+	close(stop)
+	<-done
+}

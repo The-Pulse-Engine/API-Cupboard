@@ -50,7 +50,7 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		"list":   cmdList,
 		"remove": cmdRemove,
 		"run":    cmdRun,
-		"serve":  notImplemented,
+		"serve":  cmdServe,
 	}
 	if fs.NArg() > 0 {
 		if cmd, ok := commands[fs.Arg(0)]; ok {
@@ -59,9 +59,4 @@ func cli(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	fs.Usage()
 	return 2
-}
-
-func notImplemented(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	fmt.Fprintln(stderr, "not implemented yet")
-	return 1
 }
