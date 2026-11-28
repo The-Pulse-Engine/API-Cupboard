@@ -123,12 +123,24 @@ func SaveShelves(path string, shelves []Shelf) error {
 		err = cerr
 	}
 	if err == nil {
-		err = os.Rename(f.Name(), path)
+		err = rename(f.Name(), path)
 	}
 	if err != nil {
 		os.Remove(f.Name())
 	}
 	return err
+}
+
+// rename retries on Windows: while another process reads shelves.json (cupboard serve,
+// cupboard list), replacing it fails with "Access is denied" for a moment.
+func rename(from, to string) error {
+	for try := 0; ; try++ {
+		err := os.Rename(from, to)
+		if err == nil || runtime.GOOS != "windows" || !errors.Is(err, fs.ErrPermission) || try == 100 {
+			return err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 // A lock older than this belongs to a command that died. Real holders keep it for milliseconds,
